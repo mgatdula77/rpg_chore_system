@@ -207,41 +207,47 @@ async function showShop() {
   const v = document.getElementById('view');
   const me = await api('/me');
   const gear = await api('/gear');
-  const inv = await api('/inventory').catch(()=>[]);
-  state.gear = gear; state.inventory = inv;
+  const inv  = await api('/inventory').catch(()=>[]);
+  state.gear = gear;
+  state.inventory = inv;
 
-  const owned = new Map(inv.map(i=>[i.id, i])); // gear.id -> item
+  // id -> owned item (with equipped flag)
+  const owned = new Map(inv.map(i => [i.id, i]));
 
   v.innerHTML = `
     <div class="card">
       <h2>Shop & Gear</h2>
       <div class="small">Coins: ${Number(me.coins).toFixed(2)}</div>
       <div class="grid">
-        ${gear.map(g=>{
+        ${gear.map(g => {
           const mine = owned.get(g.id);
-          const btns = mine
+          const buttons = mine
             ? (mine.equipped
-                ? `<button class="btn" onclick="unequip(${g.id})">Unequip</button>`
+                ? `<button class="btn"        onclick="unequip(${g.id})">Unequip</button>`
                 : `<button class="btn primary" onclick="equip(${g.id})">Equip</button>`)
             : `<button class="btn" onclick="buyGear(${g.id})">Buy (${Number(g.cost).toFixed(2)})</button>`;
+
+          // NOTE: all references use g.slot (not 'slot')
+          const iconSvg = (ICONS_SVG[g.slot] || '');
+
           return `
-          <div class="card">
-            <div class="gear-row">
-              <div class="pixel" aria-label="${slot}">${ICONS_SVG[slot]}</div>
-              <div>
-                <div><strong>${htmlesc(g.name)}</strong> <span class="small">(${g.rarity})</span></div>
-                <div class="small">Slot: ${g.slot} | Cost: ${Number(g.cost).toFixed(2)}</div>
-                <div class="small">+ATK ${g.attack_bonus} | +DEF ${g.defense_bonus} | +SPD ${g.speed_bonus} | +HP ${g.hp_bonus}</div>
+            <div class="card">
+              <div class="gear-row">
+                <div class="pixel" aria-label="${g.slot}">${iconSvg}</div>
+                <div>
+                  <div><strong>${htmlesc(g.name)}</strong> <span class="small">(${g.rarity})</span></div>
+                  <div class="small">Slot: ${g.slot} | Cost: ${Number(g.cost).toFixed(2)}</div>
+                  <div class="small">+ATK ${g.attack_bonus} | +DEF ${g.defense_bonus} | +SPD ${g.speed_bonus} | +HP ${g.hp_bonus}</div>
+                </div>
               </div>
+              <div style="margin-top:8px;">${buttons}</div>
             </div>
-            <div style="margin-top:8px;">${btns}</div>
-          </div>`;
+          `;
         }).join('')}
       </div>
     </div>
   `;
 }
-
 async function buyGear(id) {
   try { await api('/shop/buy',{ method:'POST', body: JSON.stringify({ gear_id: id }) }); alert('Purchased!'); showShop(); }
   catch(e){ alert(e.message); }
