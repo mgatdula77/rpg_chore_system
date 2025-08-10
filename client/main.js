@@ -4,10 +4,22 @@ const state = {
   kids: [], gear: [], boss: null, battle: null, inventory: []
 };
 
-const ICONS = {
-  weapon: 'data:image/svg+xml;utf8,<svg xmlns="http://www.w3.org/2000/svg" width="48" height="48"><rect width="48" height="48" fill="%230b1220"/><rect x="6" y="30" width="30" height="6" fill="%23d1d5db"/><rect x="36" y="24" width="6" height="18" fill="%23fca5a5"/></svg>',
-  armor:  'data:image/svg+xml;utf8,<svg xmlns="http://www.w3.org/2000/svg" width="48" height="48"><rect width="48" height="48" fill="%230b1220"/><rect x="10" y="8" width="28" height="12" fill="%236ee7b7"/><rect x="14" y="20" width="20" height="20" fill="%2322c55e"/></svg>',
-  accessory:'data:image/svg+xml;utf8,<svg xmlns="http://www.w3.org/2000/svg" width="48" height="48"><rect width="48" height="48" fill="%230b1220"/><circle cx="24" cy="24" r="10" fill="%23fbbf24"/><rect x="22" y="6" width="4" height="8" fill="%23fde68a"/></svg>'
+const ICONS_SVG = {
+  weapon: `<svg xmlns="http://www.w3.org/2000/svg" width="48" height="48">
+    <rect width="48" height="48" fill="#0b1220"/>
+    <rect x="6" y="30" width="30" height="6" fill="#d1d5db"/>
+    <rect x="36" y="24" width="6" height="18" fill="#fca5a5"/>
+  </svg>`,
+  armor: `<svg xmlns="http://www.w3.org/2000/svg" width="48" height="48">
+    <rect width="48" height="48" fill="#0b1220"/>
+    <rect x="10" y="8" width="28" height="12" fill="#6ee7b7"/>
+    <rect x="14" y="20" width="20" height="20" fill="#22c55e"/>
+  </svg>`,
+  accessory: `<svg xmlns="http://www.w3.org/2000/svg" width="48" height="48">
+    <rect width="48" height="48" fill="#0b1220"/>
+    <circle cx="24" cy="24" r="10" fill="#fbbf24"/>
+    <rect x="22" y="6" width="4" height="8" fill="#fde68a"/>
+  </svg>`
 };
 
 function setAuth(token, user) {
