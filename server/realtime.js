@@ -3,8 +3,14 @@ import { pool } from './db.js';
 
 export function initRealtime(httpServer) {
   const io = new Server(httpServer, {
-    cors: { origin: '*', methods: ['GET','POST'] }
-  });
+  cors: {
+    origin: [
+      'https://rpg-chore-client.onrender.com',
+      'http://localhost:3000'
+    ],
+    methods: ['GET','POST']
+  }
+});
 
   const battles = new Map();
   const room = id => `battle_${id}`;
