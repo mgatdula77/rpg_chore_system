@@ -323,6 +323,11 @@ async function showBossControl() {
     </div>
   `;
 }
+// NEW helper: opens the battle room; parent will see “Start battle (parent)”
+function openParentBattle() {
+  if (!state.battle) { alert('No active battle. Set this week’s boss first.'); return; }
+  joinBattle(); // reuses the existing function; shows the real-time room
+}
 async function setBoss() {
   try {
     const week_start = (()=>{const d=new Date(); d.setDate(d.getDate()-d.getDay()); return d.toISOString().slice(0,10);})();
