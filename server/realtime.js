@@ -8,7 +8,8 @@ export function initRealtime(httpServer) {
       'https://rpg-chore-client.onrender.com',
       'http://localhost:3000'
     ],
-    methods: ['GET','POST']
+    methods: ['GET','POST'],
+    allowedHeaders: ['Content-Type', 'Authorization']
   }
 });
 
