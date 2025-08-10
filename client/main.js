@@ -1,10 +1,13 @@
 const state = {
   token: localStorage.getItem('token') || null,
   user: JSON.parse(localStorage.getItem('user') || 'null'),
-  kids: [],
-  gear: [],
-  boss: null,
-  battle: null,
+  kids: [], gear: [], boss: null, battle: null, inventory: []
+};
+
+const ICONS = {
+  weapon: 'data:image/svg+xml;utf8,<svg xmlns="http://www.w3.org/2000/svg" width="48" height="48"><rect width="48" height="48" fill="%230b1220"/><rect x="6" y="30" width="30" height="6" fill="%23d1d5db"/><rect x="36" y="24" width="6" height="18" fill="%23fca5a5"/></svg>',
+  armor:  'data:image/svg+xml;utf8,<svg xmlns="http://www.w3.org/2000/svg" width="48" height="48"><rect width="48" height="48" fill="%230b1220"/><rect x="10" y="8" width="28" height="12" fill="%236ee7b7"/><rect x="14" y="20" width="20" height="20" fill="%2322c55e"/></svg>',
+  accessory:'data:image/svg+xml;utf8,<svg xmlns="http://www.w3.org/2000/svg" width="48" height="48"><rect width="48" height="48" fill="%230b1220"/><circle cx="24" cy="24" r="10" fill="%23fbbf24"/><rect x="22" y="6" width="4" height="8" fill="%23fde68a"/></svg>'
 };
 
 function setAuth(token, user) {
@@ -21,7 +24,7 @@ function logout() {
 }
 
 async function api(path, opts={}) {
-  const r = await fetch(`${window.API_BASE}${path}`, {
+  const res = await fetch(`${window.API_BASE}${path}`, {
     ...opts,
     headers: {
       'Content-Type':'application/json',
@@ -29,8 +32,10 @@ async function api(path, opts={}) {
       ...(opts.headers || {}),
     }
   });
-  if (!r.ok) { throw new Error((await r.json()).error || 'Request failed'); }
-  return r.json();
+  const ct = res.headers.get('content-type')||'';
+  const body = ct.includes('application/json') ? await res.json().catch(()=>({})) : await res.text();
+  if (!res.ok) throw new Error((body && body.error) ? body.error : (typeof body==='string'?body:`HTTP ${res.status}`));
+  return body;
 }
 
 /* ---------------- NAV ---------------- */
@@ -43,7 +48,7 @@ function renderNav() {
   const links = [];
   if (state.user.role === 'kid') {
     links.push(`<a href="#/kid" class="${location.hash==='#/kid'?'active':''}">My Dashboard</a>`);
-    links.push(`<a href="#/shop" class="${location.hash==='#/shop'?'active':''}">Shop</a>`);
+    links.push(`<a href="#/shop" class="${location.hash==='#/shop'?'active':''}">Shop & Gear</a>`);
   } else {
     links.push(`<a href="#/parent" class="${location.hash==='#/parent'?'active':''}">Parent Dashboard</a>`);
     links.push(`<a href="#/boss" class="${location.hash==='#/boss'?'active':''}">Boss Control</a>`);
@@ -64,10 +69,9 @@ function route() {
 }
 
 window.addEventListener('hashchange', route);
+function htmlesc(s){return s? s.replace(/[&<>"']/g, c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c])) : '';}
 
-/* ---------------- VIEWS ---------------- */
-function htmlesc(s){return s.replace(/[&<>"']/g, c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));}
-
+/* ---------------- AUTH VIEWS ---------------- */
 function showLogin() {
   const v = document.getElementById('view');
   v.innerHTML = `
@@ -78,11 +82,10 @@ function showLogin() {
         <input id="password" type="password" class="input" placeholder="Password" />
         <button class="btn primary" onclick="doLogin()">Login</button>
       </div>
-      <div class="small">Demo users after seeding: parent@example.com / password123, theo@example.com / password123, mia@example.com / password123</div>
+      <div class="small">Demo users: parent@example.com / password123, theo@example.com / password123, mia@example.com / password123</div>
     </div>
   `;
 }
-
 async function doLogin() {
   try {
     const email = document.getElementById('email').value.trim();
@@ -117,7 +120,6 @@ function showRegister() {
     </div>
   `;
 }
-
 async function doRegister() {
   try {
     const payload = {
@@ -129,11 +131,11 @@ async function doRegister() {
     };
     await api('/auth/register', { method:'POST', body: JSON.stringify(payload) });
     alert('Account created. Please login.');
-    location.hash = '#';
-    showLogin();
+    location.hash = '#'; showLogin();
   } catch (e) { alert(e.message); }
 }
 
+/* ---------------- KID DASHBOARD ---------------- */
 async function showKid() {
   const v = document.getElementById('view');
   const me = await api('/me');
@@ -141,6 +143,12 @@ async function showKid() {
   const boss = await api('/boss/current').catch(()=>null);
   state.boss = boss?.boss || null;
   state.battle = boss?.battle || null;
+  const inv = await api('/inventory').catch(()=>[]);
+  state.inventory = inv;
+
+  const equipped = { weapon:null, armor:null, accessory:null };
+  for (const it of inv) if (it.equipped) equipped[it.slot] = it;
+
   v.innerHTML = `
     <div class="card">
       <h2>Welcome, ${htmlesc(me.name)}</h2>
@@ -150,13 +158,22 @@ async function showKid() {
           <div class="small">Class: ${htmlesc(me.class||'-')}</div>
           <div>Level: ${me.level} | XP: ${me.xp}</div>
           <div>HP: ${me.hp} | ATK: ${me.attack} | DEF: ${me.defense} | SPD: ${me.speed}</div>
-          <div>Coins: ${me.coins}</div>
+          <div>Coins: ${Number(me.coins).toFixed(2)}</div>
         </div>
         <div class="card">
-          <h3>Submit Weekly Chores (0–30)</h3>
-          <input id="points" class="input" type="number" min="0" max="30" value="0" />
-          <button class="btn primary" onclick="submitChores()">Submit</button>
-          <div class="small">1 point = 100 XP + 1 coin.</div>
+          <h3>Equipped Gear</h3>
+          <div class="grid">
+            ${['weapon','armor','accessory'].map(slot=>{
+              const it = equipped[slot];
+              return `<div class="gear-row">
+                <img class="pixel" src="${ICONS[slot]}" alt="${slot}" />
+                <div>
+                  <div><strong>${slot.toUpperCase()}</strong></div>
+                  <div class="small">${it? htmlesc(it.name)+' ('+htmlesc(it.rarity)+')' : 'None equipped'}</div>
+                </div>
+              </div>`;
+            }).join('')}
+          </div>
         </div>
       </div>
     </div>
@@ -166,88 +183,101 @@ async function showKid() {
         <div>${htmlesc(state.boss.name)} [${htmlesc(state.boss.tier)}] — HP: ${state.boss.hp}</div>
         <div class="small">Battle ID: ${state.battle?.id || '-'}</div>
         <div class="grid">
-          <input id="damage" class="input" type="number" min="0" placeholder="Enter your damage contribution" />
-          <button class="btn primary" onclick="recordDamage()">Record Damage</button>
+          <button class="btn primary" onclick="joinBattle()">Join Battle</button>
         </div>
       ` : '<div class="small">No boss set for this week yet.</div>'}
     </div>
   `;
 }
 
-async function submitChores() {
-  try {
-    const points = parseInt(document.getElementById('points').value, 10);
-    const week_start = new Date(); week_start.setDate(week_start.getDate() - week_start.getDay());
-    const payload = { week_start: week_start.toISOString().slice(0,10), points };
-    await api('/chores/submit', { method:'POST', body: JSON.stringify(payload) });
-    alert('Submitted! XP and coins added.');
-    showKid();
-  } catch (e) { alert(e.message); }
-}
-
-async function recordDamage() {
-  try {
-    if (!state.battle) return alert('No active battle.');
-    const damage = parseInt(document.getElementById('damage').value, 10);
-    await api('/boss/record-damage', { method:'POST', body: JSON.stringify({ battle_id: state.battle.id, damage }) });
-    alert('Damage recorded!');
-  } catch (e) { alert(e.message); }
-}
-
+/* ---------------- SHOP & INVENTORY ---------------- */
 async function showShop() {
   const v = document.getElementById('view');
   const me = await api('/me');
   const gear = await api('/gear');
-  state.gear = gear;
+  const inv = await api('/inventory').catch(()=>[]);
+  state.gear = gear; state.inventory = inv;
+
+  const owned = new Map(inv.map(i=>[i.id, i])); // gear.id -> item
+
   v.innerHTML = `
     <div class="card">
-      <h2>Shop</h2>
-      <div class="small">Coins: ${me.coins}</div>
+      <h2>Shop & Gear</h2>
+      <div class="small">Coins: ${Number(me.coins).toFixed(2)}</div>
       <div class="grid">
-      ${gear.map(g=>`
-        <div class="card">
-          <div><strong>${htmlesc(g.name)}</strong> <span class="small">(${g.rarity})</span></div>
-          <div class="small">Slot: ${g.slot}</div>
-          <div class="small">Cost: ${g.cost}</div>
-          <div class="small">+ATK ${g.attack_bonus} | +DEF ${g.defense_bonus} | +SPD ${g.speed_bonus} | +HP ${g.hp_bonus}</div>
-          <button class="btn" onclick="buyGear(${g.id})">Buy</button>
-        </div>
-      `).join('')}
+        ${gear.map(g=>{
+          const mine = owned.get(g.id);
+          const btns = mine
+            ? (mine.equipped
+                ? `<button class="btn" onclick="unequip(${g.id})">Unequip</button>`
+                : `<button class="btn primary" onclick="equip(${g.id})">Equip</button>`)
+            : `<button class="btn" onclick="buyGear(${g.id})">Buy (${Number(g.cost).toFixed(2)})</button>`;
+          return `
+          <div class="card">
+            <div class="gear-row">
+              <img class="pixel" src="${ICONS[g.slot]}" alt="${g.slot}" />
+              <div>
+                <div><strong>${htmlesc(g.name)}</strong> <span class="small">(${g.rarity})</span></div>
+                <div class="small">Slot: ${g.slot} | Cost: ${Number(g.cost).toFixed(2)}</div>
+                <div class="small">+ATK ${g.attack_bonus} | +DEF ${g.defense_bonus} | +SPD ${g.speed_bonus} | +HP ${g.hp_bonus}</div>
+              </div>
+            </div>
+            <div style="margin-top:8px;">${btns}</div>
+          </div>`;
+        }).join('')}
       </div>
     </div>
   `;
 }
 
 async function buyGear(id) {
-  try {
-    await api('/shop/buy',{ method:'POST', body: JSON.stringify({ gear_id: id }) });
-    alert('Purchased! Stats updated.');
-    showShop();
-  } catch (e) { alert(e.message); }
+  try { await api('/shop/buy',{ method:'POST', body: JSON.stringify({ gear_id: id }) }); alert('Purchased!'); showShop(); }
+  catch(e){ alert(e.message); }
+}
+async function equip(id) {
+  try { await api('/inventory/equip',{ method:'POST', body: JSON.stringify({ gear_id: id }) }); alert('Equipped!'); showShop(); }
+  catch(e){ alert(e.message); }
+}
+async function unequip(id) {
+  try { await api('/inventory/unequip',{ method:'POST', body: JSON.stringify({ gear_id: id }) }); alert('Unequipped.'); showShop(); }
+  catch(e){ alert(e.message); }
 }
 
+/* ---------------- PARENT & BOSS ---------------- */
 async function showParent() {
   const v = document.getElementById('view');
   const kids = await api('/kids');
   state.kids = kids;
+  const week_start = (() => { const d=new Date(); d.setDate(d.getDate()-d.getDay()); return d.toISOString().slice(0,10); })();
   v.innerHTML = `
     <div class="card">
       <h2>Parent Dashboard</h2>
+      <div class="small">Week starting: ${week_start}</div>
       <table>
-        <thead><tr><th>Name</th><th>Class</th><th>Lvl</th><th>XP</th><th>HP</th><th>ATK</th><th>DEF</th><th>SPD</th><th>Coins</th></tr></thead>
+        <thead><tr><th>Name</th><th>Class</th><th>Lvl</th><th>XP</th><th>HP</th><th>ATK</th><th>DEF</th><th>SPD</th><th>Coins</th><th>Points (0–30)</th><th></th></tr></thead>
         <tbody>
-          ${kids.map(k=>`<tr><td>${htmlesc(k.name)}</td><td>${htmlesc(k.class||'-')}</td><td>${k.level}</td><td>${k.xp}</td><td>${k.hp}</td><td>${k.attack}</td><td>${k.defense}</td><td>${k.speed}</td><td>${k.coins}</td></tr>`).join('')}
+          ${kids.map(k=>`<tr>
+            <td>${htmlesc(k.name)}</td><td>${htmlesc(k.class||'-')}</td><td>${k.level}</td><td>${k.xp}</td><td>${k.hp}</td><td>${k.attack}</td><td>${k.defense}</td><td>${k.speed}</td>
+            <td>${Number(k.coins).toFixed(2)}</td>
+            <td><input id="pts_${k.user_id}" class="input" type="number" min="0" max="30" value="0" /></td>
+            <td><button class="btn" onclick="setPoints(${k.user_id}, '${week_start}')">Save</button></td>
+          </tr>`).join('')}
         </tbody>
       </table>
     </div>
   `;
 }
+async function setPoints(userId, week_start) {
+  try { const val = parseInt(document.getElementById(`pts_${userId}`).value,10);
+    await api('/chores/admin-set', { method:'POST', body: JSON.stringify({ user_id:userId, week_start, points: val }) });
+    alert('Saved!'); showParent();
+  } catch (e) { alert(e.message); }
+}
 
 async function showBossControl() {
   const v = document.getElementById('view');
   const boss = await api('/boss/current').catch(()=>null);
-  state.boss = boss?.boss || null;
-  state.battle = boss?.battle || null;
+  state.boss = boss?.boss || null; state.battle = boss?.battle || null;
   v.innerHTML = `
     <div class="card">
       <h2>Boss Control (Parent)</h2>
@@ -275,11 +305,9 @@ async function showBossControl() {
     </div>
   `;
 }
-
 async function setBoss() {
   try {
-    const today = new Date();
-    const week_start = new Date(today); week_start.setDate(week_start.getDate() - week_start.getDay());
+    const week_start = (()=>{const d=new Date(); d.setDate(d.getDate()-d.getDay()); return d.toISOString().slice(0,10);})();
     const payload = {
       name: document.getElementById('b_name').value || 'Unknown Foe',
       tier: document.getElementById('b_tier').value,
@@ -287,23 +315,86 @@ async function setBoss() {
       attack_bonus: parseInt(document.getElementById('b_atk').value||'0',10),
       damage_min: parseInt(document.getElementById('b_dmin').value||'0',10),
       damage_max: parseInt(document.getElementById('b_dmax').value||'0',10),
-      abilities: [],
-      week_start: week_start.toISOString().slice(0,10),
+      abilities: [], week_start,
     };
     await api('/boss/set',{ method:'POST', body: JSON.stringify(payload) });
-    alert('Boss set for this week!');
-    showBossControl();
+    alert('Boss set for this week!'); showBossControl();
   } catch (e) { alert(e.message); }
 }
-
 async function resolveBattle() {
   try {
     if (!state.battle) return alert('No active battle to resolve');
     const res = await api('/boss/resolve',{ method:'POST', body: JSON.stringify({ battle_id: state.battle.id }) });
-    alert(`Loot distributed! Total coin pot: ${res.totalCoins}`);
-    showBossControl();
+    alert(`Loot distributed! Total coin pot: ${res.totalCoins}`); showBossControl();
   } catch (e) { alert(e.message); }
 }
+
+/* -------- Real-time Battle Client -------- */
+let battleSocket = null;
+let battleState = null;
+
+function showBattleRoom() {
+  const v = document.getElementById('view');
+  if (!battleState) { v.innerHTML = '<div class="card">Connecting...</div>'; return; }
+  const meId = state.user.id;
+  const participants = Object.values(battleState.participants || {});
+  const orderDisplay = (battleState.order || []).map(id => {
+    const p = battleState.participants[id];
+    return p ? `${p.name}${(id===meId)?' (you)':''}` : id;
+  }).join(' → ');
+
+  v.innerHTML = `
+    <div class="card">
+      <h2>Battle – ${battleState.status.toUpperCase()}</h2>
+      <div>Round: ${battleState.round || 0}</div>
+      <div class="small">Turn order: ${orderDisplay || '-'}</div>
+      <div class="grid">
+        ${participants.map(p=>`
+          <div class="card">
+            <strong>${htmlesc(p.name)}${p.userId===meId?' (you)':''}</strong>
+            <div>HP: ${p.hp}</div>
+            <div>ATK: ${p.attack} | DEF: ${p.defense} | SPD: ${p.speed}</div>
+            <div class="small">${p.connected?'🟢 online':'⚫ offline'} ${p.ready?'• ready':''}</div>
+            ${p.last ? `<div class="small">Last: ${p.last.type}${p.last.dmg?(' '+p.last.dmg):''}${p.last.roll?(' (roll '+p.last.roll+')'):''}</div>` : ''}
+          </div>
+        `).join('')}
+      </div>
+
+      ${battleState.status==='lobby' ? `
+        <button class="btn primary" onclick="battleReady()">I am ready</button>
+        ${state.user.role!=='kid' ? `<button class="btn" onclick="battleStart()">Start battle (parent)</button>`:''}
+        <button class="btn" onclick="leaveBattle()">Leave</button>
+      ` : ''}
+
+      ${battleState.status==='active' ? `
+        <div class="card">
+          <h3>Your actions</h3>
+          <button class="btn primary" onclick="battleAction('attack')">Attack</button>
+          <button class="btn" onclick="battleAction('defend')">Defend</button>
+          <button class="btn" onclick="leaveBattle()">Leave</button>
+        </div>
+      ` : ''}
+    </div>
+  `;
+}
+
+async function joinBattle() {
+  if (!state.battle) { alert('No active battle ID.'); return; }
+  const url = window.API_BASE.replace('https://','').replace('http://','');
+  battleSocket = io(`https://${url}/battle`, { transports: ['websocket'] });
+
+  battleSocket.on('connect', () => {
+    battleSocket.emit('join', { battleId: state.battle.id, tokenUser: { id: state.user.id, name: state.user.name, role: state.user.role } });
+  });
+  battleSocket.on('state', (s) => { battleState = s; showBattleRoom(); });
+  battleSocket.on('disconnect', () => { alert('Disconnected from battle'); route(); });
+
+  showBattleRoom();
+}
+function battleReady(){ battleSocket?.emit('ready'); }
+function battleStart(){ battleSocket?.emit('start'); }
+function battleAction(type){ battleSocket?.emit('action', { type }); }
+function leaveBattle(){ try{ battleSocket?.disconnect(); }catch{}; battleSocket=null; route(); }
 
 // Boot
 renderNav(); route();

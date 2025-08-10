@@ -1,4 +1,3 @@
-
 import express from 'express';
 import cors from 'cors';
 import helmet from 'helmet';
@@ -7,6 +6,8 @@ import bcrypt from 'bcrypt';
 import jwt from 'jsonwebtoken';
 import { pool } from './db.js';
 import { requireAuth, requireRole } from './authMiddleware.js';
+import http from 'http';
+import { initRealtime } from './realtime.js';
 
 dotenv.config();
 const app = express();
@@ -55,35 +56,93 @@ app.get('/me', requireAuth, async (req, res) => {
   res.json(r.rows[0]);
 });
 
+/* ---------------- INVENTORY ---------------- */
+app.get('/inventory', requireAuth, requireRole('kid'), async (req, res) => {
+  const r = await pool.query(`
+    select g.*, ug.equipped
+    from user_gear ug
+    join gear g on g.id = ug.gear_id
+    where ug.user_id = $1
+    order by g.slot, g.cost
+  `, [req.user.id]);
+  res.json(r.rows);
+});
+
+app.post('/inventory/equip', requireAuth, requireRole('kid'), async (req, res) => {
+  const { gear_id } = req.body;
+  const gr = await pool.query('select * from gear where id=$1', [gear_id]);
+  const g = gr.rows[0];
+  if (!g) return res.status(404).json({ error: 'Gear not found' });
+  const own = await pool.query('select * from user_gear where user_id=$1 and gear_id=$2', [req.user.id, gear_id]);
+  if (!own.rows[0]) return res.status(400).json({ error: 'You do not own this item' });
+
+  await pool.query('begin');
+  // Unequip any other item in same slot
+  const current = await pool.query(`
+    select g.*, ug.equipped from user_gear ug join gear g on g.id=ug.gear_id
+    where ug.user_id=$1 and ug.equipped=true and g.slot=$2
+  `, [req.user.id, g.slot]);
+  if (current.rows[0]) {
+    const c = current.rows[0];
+    await pool.query('update user_gear set equipped=false where user_id=$1 and gear_id=$2', [req.user.id, c.id]);
+    await pool.query('update users set attack=attack-$1, defense=defense-$2, speed=speed-$3, hp=hp-$4 where id=$5',
+      [c.attack_bonus, c.defense_bonus, c.speed_bonus, c.hp_bonus, req.user.id]);
+  }
+  // Equip new
+  await pool.query('update user_gear set equipped=true where user_id=$1 and gear_id=$2', [req.user.id, gear_id]);
+  await pool.query('update users set attack=attack+$1, defense=defense+$2, speed=speed+$3, hp=hp+$4 where id=$5',
+    [g.attack_bonus, g.defense_bonus, g.speed_bonus, g.hp_bonus, req.user.id]);
+  await pool.query('commit');
+  res.json({ ok: true });
+});
+
+app.post('/inventory/unequip', requireAuth, requireRole('kid'), async (req, res) => {
+  const { gear_id } = req.body;
+  const gr = await pool.query('select * from gear where id=$1', [gear_id]);
+  const g = gr.rows[0];
+  if (!g) return res.status(404).json({ error: 'Gear not found' });
+  const ug = await pool.query('select equipped from user_gear where user_id=$1 and gear_id=$2', [req.user.id, gear_id]);
+  if (!ug.rows[0] || !ug.rows[0].equipped) return res.status(400).json({ error: 'Not equipped' });
+
+  await pool.query('begin');
+  await pool.query('update user_gear set equipped=false where user_id=$1 and gear_id=$2', [req.user.id, gear_id]);
+  await pool.query('update users set attack=attack-$1, defense=defense-$2, speed=speed-$3, hp=hp-$4 where id=$5',
+    [g.attack_bonus, g.defense_bonus, g.speed_bonus, g.hp_bonus, req.user.id]);
+  await pool.query('commit');
+  res.json({ ok: true });
+});
+
 /* ---------------- KIDS & PARENTS ---------------- */
 app.get('/kids', requireAuth, requireRole('parent','admin'), async (req, res) => {
   const r = await pool.query('select * from kid_summary order by name');
   res.json(r.rows);
 });
 
-app.post('/chores/submit', requireAuth, requireRole('kid'), async (req, res) => {
+app.post('/chores/admin-set', requireAuth, requireRole('parent','admin'), async (req, res) => {
   try {
-    const { week_start, points } = req.body; // points 0..30
+    const { user_id, week_start, points } = req.body;
+    if (!user_id || points == null || !week_start) return res.status(400).json({ error: 'Missing fields' });
     if (points < 0 || points > 30) return res.status(400).json({ error: 'Points out of range' });
     const xp = points * 100;
-    const coins = points * 1;
+    const coins = Number(points).toFixed(2);
     await pool.query('begin');
+    await pool.query(`
+      insert into chores (user_id, week_start, points, xp_awarded, coins_awarded)
+      values ($1,$2,$3,$4,$5)
+      on conflict (user_id, week_start) do update set points=excluded.points, xp_awarded=excluded.xp_awarded, coins_awarded=excluded.coins_awarded
+    `,[user_id, week_start, points, xp, coins]);
     await pool.query(
-      `insert into chores (user_id, week_start, points, xp_awarded, coins_awarded)
-       values ($1,$2,$3,$4,$5)
-       on conflict (user_id, week_start) do update set points = excluded.points, xp_awarded=excluded.xp_awarded, coins_awarded=excluded.coins_awarded`,
-      [req.user.id, week_start, points, xp, coins]
-    );
-    await pool.query(
-      `update users set xp = xp + $1, coins = coins + $2 where id=$3`,
-      [xp, coins, req.user.id]
+      `update users set xp = (select coalesce(sum(xp_awarded),0) from chores where user_id=$1),
+                       coins = (select coalesce(sum(coins_awarded),0) from chores where user_id=$1)
+       where id=$1`,
+      [user_id]
     );
     await pool.query('commit');
-    res.json({ ok: true, xpGained: xp, coinsGained: coins });
+    res.json({ ok: true, xp, coins: Number(coins) });
   } catch (e) {
     await pool.query('rollback');
     console.error(e);
-    res.status(500).json({ error: 'Submit failed' });
+    res.status(500).json({ error: 'Admin set failed' });
   }
 });
 
@@ -101,15 +160,15 @@ app.post('/shop/buy', requireAuth, requireRole('kid'), async (req, res) => {
     if (!g) return res.status(404).json({ error: 'Gear not found' });
     if (!g.purchasable) return res.status(400).json({ error: 'Not purchasable' });
     const ur = await pool.query('select coins from users where id=$1', [req.user.id]);
-    const coins = ur.rows[0].coins;
-    if (coins < g.cost) return res.status(400).json({ error: 'Insufficient coins' });
+    const coins = Number(ur.rows[0].coins);
+    if (coins < Number(g.cost)) return res.status(400).json({ error: 'Insufficient coins' });
 
+    const newCoins = (coins - Number(g.cost)).toFixed(2);
     await pool.query('begin');
-    await pool.query('update users set coins=coins-$1, attack=attack+$2, defense=defense+$3, speed=speed+$4, hp=hp+$5 where id=$6',
-      [g.cost, g.attack_bonus, g.defense_bonus, g.speed_bonus, g.hp_bonus, req.user.id]);
+    await pool.query('update users set coins=$1 where id=$2', [newCoins, req.user.id]);
     await pool.query('insert into user_gear (user_id, gear_id) values ($1,$2) on conflict do nothing', [req.user.id, gear_id]);
     await pool.query('commit');
-    res.json({ ok: true });
+    res.json({ ok: true, newBalance: Number(newCoins) });
   } catch (e) {
     await pool.query('rollback');
     console.error(e);
@@ -118,7 +177,6 @@ app.post('/shop/buy', requireAuth, requireRole('kid'), async (req, res) => {
 });
 
 /* ---------------- BOSS & BATTLES ---------------- */
-// Parent sets the weekly boss with fixed stats (not scaled to players)
 app.post('/boss/set', requireAuth, requireRole('parent','admin'), async (req, res) => {
   const { name, tier, hp, attack_bonus, damage_min, damage_max, abilities=[], week_start } = req.body;
   if (!name || !tier || !hp || !week_start) return res.status(400).json({ error: 'Missing fields' });
@@ -129,14 +187,13 @@ app.post('/boss/set', requireAuth, requireRole('parent','admin'), async (req, re
      returning *`,
     [name,tier,hp,attack_bonus,damage_min,damage_max,JSON.stringify(abilities),week_start]
   );
-  // create or fetch battle
   const br = await pool.query('insert into battles (boss_id,total_damage,resolved) values ($1,0,false) returning *', [r.rows[0].id]);
   res.json({ boss: r.rows[0], battle: br.rows[0] });
 });
 
 app.get('/boss/current', requireAuth, async (req, res) => {
   const today = new Date();
-  const week_start = new Date(today); week_start.setDate(week_start.getDate() - week_start.getDay()); // Sunday
+  const week_start = new Date(today); week_start.setDate(week_start.getDate() - week_start.getDay());
   const r = await pool.query('select * from bosses where week_start=$1', [week_start.toISOString().slice(0,10)]);
   if (!r.rows[0]) return res.json(null);
   const boss = r.rows[0];
@@ -144,18 +201,6 @@ app.get('/boss/current', requireAuth, async (req, res) => {
   res.json({ boss, battle: br.rows[0] });
 });
 
-// Kids record their damage (based on their chores & gear). You can define UI logic client-side.
-app.post('/boss/record-damage', requireAuth, requireRole('kid'), async (req, res) => {
-  const { battle_id, damage } = req.body;
-  if (damage < 0) return res.status(400).json({ error: 'Bad damage' });
-  await pool.query('begin');
-  await pool.query('insert into battle_contributions (battle_id,user_id,damage) values ($1,$2,$3) on conflict (battle_id,user_id) do update set damage=excluded.damage', [battle_id, req.user.id, damage]);
-  await pool.query('update battles set total_damage = (select coalesce(sum(damage),0) from battle_contributions where battle_id=$1) where id=$1', [battle_id]);
-  await pool.query('commit');
-  res.json({ ok: true });
-});
-
-// Parent resolves weekly battle and distributes loot based on difficulty tier
 app.post('/boss/resolve', requireAuth, requireRole('parent','admin'), async (req, res) => {
   const { battle_id } = req.body;
   const br = await pool.query('select * from battles b join bosses s on b.boss_id = s.id where b.id=$1', [battle_id]);
@@ -163,33 +208,27 @@ app.post('/boss/resolve', requireAuth, requireRole('parent','admin'), async (req
   if (!row) return res.status(404).json({ error: 'Battle not found' });
   if (row.resolved) return res.status(400).json({ error: 'Already resolved' });
 
-  // Define loot by tier
   const lootConfig = {
     mid: { coins: [10,20], rareChance: 0.05, realWorldChance: 0.01 },
     standard: { coins: [20,35], rareChance: 0.12, realWorldChance: 0.02 },
-    epic: { coins: [30,50], rareChance: 0.2, realWorldChance: 0.05 },
+    epic: { coins: [30,50], rareChance: 0.20, realWorldChance: 0.05 },
   };
   const cfg = lootConfig[row.tier] || lootConfig.standard;
-
-  // Random helper
   const randInt = (a,b)=>Math.floor(Math.random()*(b-a+1))+a;
   const chance = (p)=>Math.random()<p;
-
-  // Total coin pot
   const totalCoins = randInt(cfg.coins[0], cfg.coins[1]);
 
-  // Contributions
   const cr = await pool.query('select user_id, damage from battle_contributions where battle_id=$1', [battle_id]);
   const contribs = cr.rows;
   const sumDamage = contribs.reduce((s,c)=>s+c.damage,0) || 1;
 
-  // Distribute coins proportionally
   for (const c of contribs) {
-    const share = Math.floor(totalCoins * (c.damage / sumDamage));
-    if (share>0) await pool.query('update users set coins=coins+$1 where id=$2', [share, c.user_id]);
+    const share = Number(totalCoins * (c.damage / sumDamage)).toFixed(2);
+    const cur = await pool.query('select coins from users where id=$1', [c.user_id]);
+    const newBal = (Number(cur.rows[0].coins) + Number(share)).toFixed(2);
+    await pool.query('update users set coins=$1 where id=$2', [newBal, c.user_id]);
   }
 
-  // Rare gear drops (independent rolls per contributor)
   const gearRows = await pool.query("select id from gear where rarity in ('rare','legendary')");
   const gearIds = gearRows.rows.map(r=>r.id);
   for (const c of contribs) {
@@ -197,17 +236,14 @@ app.post('/boss/resolve', requireAuth, requireRole('parent','admin'), async (req
       const gid = gearIds[randInt(0, gearIds.length-1)];
       await pool.query('insert into user_gear (user_id, gear_id) values ($1,$2) on conflict do nothing', [c.user_id, gid]);
     }
-    // Real-world reward placeholder: record as a note in description (parents can honor it)
-    if (chance(cfg.realWorldChance)) {
-      await pool.query("update users set coins=coins+0 where id=$1", [c.user_id]); // no-op, placeholder
-    }
   }
 
   await pool.query('update battles set resolved=true where id=$1', [battle_id]);
   res.json({ ok: true, totalCoins, participants: contribs.length });
 });
 
-/* -------------- HEALTH CHECK -------------- */
 app.get('/', (_req,res)=>res.send('Chore RPG API running'));
 
-app.listen(PORT, ()=>console.log(`API on :${PORT}`));
+const server = http.createServer(app);
+initRealtime(server);
+server.listen(PORT, ()=>console.log(`API on :${PORT}`));

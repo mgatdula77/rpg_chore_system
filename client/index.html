@@ -16,8 +16,11 @@
     <main id="view"></main>
   </div>
   <script>
-    window.API_BASE = 'https://rpg-chore-system.onrender.com';
+    window.API_BASE = (location.hostname === 'localhost')
+      ? 'http://localhost:4000'
+      : 'https://rpg-chore-system.onrender.com';
   </script>
+  <script src="https://cdn.socket.io/4.7.5/socket.io.min.js"></script>
   <script src="main.js"></script>
 </body>
 </html>

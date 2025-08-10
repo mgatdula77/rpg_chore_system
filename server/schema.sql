@@ -1,4 +1,4 @@
--- PostgreSQL schema
+-- v3 schema
 create table if not exists users (
   id serial primary key,
   role text not null check (role in ('kid','parent','admin')),
@@ -12,7 +12,7 @@ create table if not exists users (
   attack int not null default 1,
   defense int not null default 0,
   speed int not null default 0,
-  coins int not null default 0,
+  coins numeric(12,2) not null default 0.00,
   created_at timestamptz not null default now()
 );
 
@@ -21,7 +21,7 @@ create table if not exists gear (
   name text not null,
   slot text not null check (slot in ('weapon','armor','accessory')),
   rarity text not null check (rarity in ('common','uncommon','rare','legendary')),
-  cost int not null,
+  cost numeric(12,2) not null,
   attack_bonus int not null default 0,
   defense_bonus int not null default 0,
   speed_bonus int not null default 0,
@@ -33,6 +33,7 @@ create table if not exists gear (
 create table if not exists user_gear (
   user_id int references users(id) on delete cascade,
   gear_id int references gear(id) on delete cascade,
+  equipped boolean not null default false,
   primary key (user_id, gear_id)
 );
 
@@ -54,7 +55,7 @@ create table if not exists chores (
   week_start date not null,
   points int not null check (points between 0 and 30),
   xp_awarded int not null,
-  coins_awarded int not null,
+  coins_awarded numeric(12,2) not null,
   unique (user_id, week_start)
 );
 
@@ -73,15 +74,7 @@ create table if not exists battle_contributions (
   unique (battle_id, user_id)
 );
 
--- Simple helper view for parent dashboards
 create or replace view kid_summary as
 select u.id as user_id, u.name, u.class, u.level, u.xp, u.hp, u.attack, u.defense, u.speed, u.coins
 from users u
 where role='kid';
-
--- --- Money to 2 decimals ---
-ALTER TABLE users ALTER COLUMN coins TYPE numeric(12,2) USING coins::numeric(12,2);
-ALTER TABLE gear  ALTER COLUMN cost  TYPE numeric(12,2) USING cost::numeric(12,2);
-
--- Default 0.00 just in case
-ALTER TABLE users ALTER COLUMN coins SET DEFAULT 0.00;
