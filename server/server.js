@@ -21,10 +21,18 @@ app.use(cors({
   allowedHeaders: ['Content-Type', 'Authorization'],
 }));
 
-// Helmet AFTER CORS — disable CORP so cross-origin XHR is allowed
-app.use(helmet({
-  crossOriginResourcePolicy: false,
+// Be extra-safe for preflight
+app.options('*', cors({
+  origin: [
+    'https://rpg-chore-client.onrender.com',
+    'http://localhost:3000'
+  ],
+  methods: ['GET', 'POST', 'PUT', 'DELETE', 'OPTIONS'],
+  allowedHeaders: ['Content-Type', 'Authorization'],
 }));
+
+// Helmet AFTER CORS — disable CORP so cross-origin XHR is allowed
+app.use(helmet({ crossOriginResourcePolicy: false }));
 
 // JSON parser
 app.use(express.json());
