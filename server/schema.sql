@@ -78,3 +78,10 @@ create or replace view kid_summary as
 select u.id as user_id, u.name, u.class, u.level, u.xp, u.hp, u.attack, u.defense, u.speed, u.coins
 from users u
 where role='kid';
+
+-- --- Money to 2 decimals ---
+ALTER TABLE users ALTER COLUMN coins TYPE numeric(12,2) USING coins::numeric(12,2);
+ALTER TABLE gear  ALTER COLUMN cost  TYPE numeric(12,2) USING cost::numeric(12,2);
+
+-- Default 0.00 just in case
+ALTER TABLE users ALTER COLUMN coins SET DEFAULT 0.00;
