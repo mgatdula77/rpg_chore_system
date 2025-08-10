@@ -381,7 +381,7 @@ function showBattleRoom() {
 async function joinBattle() {
   if (!state.battle) { alert('No active battle ID.'); return; }
   const url = window.API_BASE.replace('https://','').replace('http://','');
-  battleSocket = io(`https://${url}/battle`, { transports: ['websocket'] });
+  battleSocket = io(`${window.API_BASE}/battle`, { transports: ['websocket', 'polling'] });
 
   battleSocket.on('connect', () => {
     battleSocket.emit('join', { battleId: state.battle.id, tokenUser: { id: state.user.id, name: state.user.name, role: state.user.role } });
