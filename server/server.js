@@ -11,9 +11,24 @@ import { initRealtime } from './realtime.js';
 
 dotenv.config();
 const app = express();
-app.use(helmet());
-app.use(cors());
+// CORS FIRST — allow your client + local dev and the Authorization header
+app.use(cors({
+  origin: [
+    'https://rpg-chore-client.onrender.com', // your live frontend
+    'http://localhost:3000'                  // local dev (optional)
+  ],
+  methods: ['GET', 'POST', 'PUT', 'DELETE', 'OPTIONS'],
+  allowedHeaders: ['Content-Type', 'Authorization'],
+}));
+
+// Helmet AFTER CORS — disable CORP so cross-origin XHR is allowed
+app.use(helmet({
+  crossOriginResourcePolicy: false,
+}));
+
+// JSON parser
 app.use(express.json());
+
 
 const PORT = process.env.PORT || 4000;
 const JWT_SECRET = process.env.JWT_SECRET || 'devsecret';
