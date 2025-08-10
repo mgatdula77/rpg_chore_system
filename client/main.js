@@ -294,8 +294,13 @@ async function setPoints(userId, week_start) {
 
 async function showBossControl() {
   const v = document.getElementById('view');
-  const boss = await api('/boss/current').catch(()=>null);
-  state.boss = boss?.boss || null; state.battle = boss?.battle || null;
+
+  // fetch current boss+battle
+  let bc = null;
+  try { bc = await api('/boss/current'); } catch {}
+  state.boss = bc?.boss || null;
+  state.battle = bc?.battle || null;
+
   v.innerHTML = `
     <div class="card">
       <h2>Boss Control (Parent)</h2>
@@ -312,22 +317,51 @@ async function showBossControl() {
         <input id="b_dmax" class="input" type="number" placeholder="Damage max" />
         <button class="btn primary" onclick="setBoss()">Set This Week's Boss</button>
       </div>
-      <div class="small">Current: ${(state.boss)? state.boss.name+' ['+state.boss.tier+'] HP '+state.boss.hp : 'None'}</div>
+      <div class="small">Current: ${state.boss ? `${state.boss.name} [${state.boss.tier}] HP ${state.boss.hp}` : 'None'}</div>
     </div>
+
     <div class="card">
-      <h3>Resolve Battle</h3>
+      <h3>Battle Controls</h3>
       <div class="grid">
-        <button class="btn primary" onclick="resolveBattle()">Distribute Loot</button>
+        ${state.battle
+          ? `<button class="btn primary" onclick="openParentBattle()">Open Battle Room</button>`
+          : `<button class="btn primary" onclick="createAndOpenBattle()">Create & Open Battle</button>`}
+        <button class="btn" onclick="resolveBattle()">Distribute Loot</button>
       </div>
-      <div class="small">Battle ID: ${state.battle?.id || '-'}</div>
+      <div class="small">Battle ID: ${state.battle?.id ?? '-'}</div>
     </div>
   `;
 }
-// NEW helper: opens the battle room; parent will see “Start battle (parent)”
+
+// Open existing battle room; parent will see “Start battle (parent)”
 function openParentBattle() {
-  if (!state.battle) { alert('No active battle. Set this week’s boss first.'); return; }
-  joinBattle(); // reuses the existing function; shows the real-time room
+  if (!state.battle) { alert('No active battle.'); return; }
+  joinBattle();
 }
+
+// Create a boss for this week then open the battle room
+async function createAndOpenBattle() {
+  try {
+    const week_start = (() => { const d=new Date(); d.setDate(d.getDate()-d.getDay()); return d.toISOString().slice(0,10); })();
+    const payload = {
+      name: document.getElementById('b_name')?.value || 'Weekly Boss',
+      tier: document.getElementById('b_tier')?.value || 'standard',
+      hp: parseInt(document.getElementById('b_hp')?.value || '500', 10),
+      attack_bonus: parseInt(document.getElementById('b_atk')?.value || '2', 10),
+      damage_min: parseInt(document.getElementById('b_dmin')?.value || '1', 10),
+      damage_max: parseInt(document.getElementById('b_dmax')?.value || '6', 10),
+      abilities: [],
+      week_start,
+    };
+    const res = await api('/boss/set', { method:'POST', body: JSON.stringify(payload) });
+    state.boss = res.boss;
+    state.battle = res.battle;
+    openParentBattle();
+  } catch (e) {
+    alert(e.message || 'Failed to create battle.');
+  }
+}
+
 async function setBoss() {
   try {
     const week_start = (()=>{const d=new Date(); d.setDate(d.getDate()-d.getDay()); return d.toISOString().slice(0,10);})();
