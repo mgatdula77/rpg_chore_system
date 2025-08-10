@@ -17,3 +17,5 @@ th, td { text-align:left; padding:8px; border-bottom:1px solid #1f2937; }
 a { color: var(--accent); text-decoration: none; }
 .pixel { image-rendering: pixelated; width:48px; height:48px; border:1px solid #374151; border-radius:8px; background:#0b1220; }
 .gear-row { display:flex; align-items:center; gap:10px; }
+.pixel { image-rendering: pixelated; width:48px; height:48px; border:1px solid #374151; border-radius:8px; background:#0b1220; display:flex; align-items:center; justify-content:center; }
+.pixel svg { width:48px; height:48px; }
