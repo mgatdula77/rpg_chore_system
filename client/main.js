@@ -178,7 +178,7 @@ async function showKid() {
             ${['weapon','armor','accessory'].map(slot=>{
               const it = equipped[slot];
               return `<div class="gear-row">
-                <img class="pixel" src="${ICONS[slot]}" alt="${slot}" />
+                <div class="pixel" aria-label="${slot}">${ICONS_SVG[slot]}</div>
                 <div>
                   <div><strong>${slot.toUpperCase()}</strong></div>
                   <div class="small">${it? htmlesc(it.name)+' ('+htmlesc(it.rarity)+')' : 'None equipped'}</div>
@@ -227,7 +227,7 @@ async function showShop() {
           return `
           <div class="card">
             <div class="gear-row">
-              <img class="pixel" src="${ICONS[g.slot]}" alt="${g.slot}" />
+              <div class="pixel" aria-label="${slot}">${ICONS_SVG[slot]}</div>
               <div>
                 <div><strong>${htmlesc(g.name)}</strong> <span class="small">(${g.rarity})</span></div>
                 <div class="small">Slot: ${g.slot} | Cost: ${Number(g.cost).toFixed(2)}</div>
