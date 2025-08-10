@@ -21,7 +21,7 @@ app.use(cors({
   allowedHeaders: ['Content-Type', 'Authorization'],
 }));
 
-// Be extra-safe for preflight
+// Explicitly handle preflight for every route
 app.options('*', cors({
   origin: [
     'https://rpg-chore-client.onrender.com',
@@ -32,10 +32,14 @@ app.options('*', cors({
 }));
 
 // Helmet AFTER CORS — disable CORP so cross-origin XHR is allowed
-app.use(helmet({ crossOriginResourcePolicy: false }));
+app.use(helmet({
+  crossOriginResourcePolicy: false,
+}));
 
 // JSON parser
 app.use(express.json());
+
+
 
 
 const PORT = process.env.PORT || 4000;
