@@ -387,12 +387,13 @@ async function resolveBattle() {
 }
 
 /* -------- Real-time Battle Client -------- */
+/* -------- Real-time Battle Client -------- */
 let battleSocket = null;
 let battleState = null;
 
 function showBattleRoom() {
   const v = document.getElementById('view');
-  if (!battleState) { v.innerHTML = '<div class="card">Connecting...</div>'; return; }
+  if (!battleState) { v.innerHTML = '<div class="card">Connecting…</div>'; return; }
   const meId = state.user.id;
   const participants = Object.values(battleState.participants || {});
   const orderDisplay = (battleState.order || []).map(id => {
@@ -435,23 +436,46 @@ function showBattleRoom() {
   `;
 }
 
-async function joinBattle() {
+function joinBattle() {
   if (!state.battle) { alert('No active battle ID.'); return; }
-  const url = window.API_BASE.replace('https://','').replace('http://','');
-  battleSocket = io(`${window.API_BASE}/battle`, { transports: ['websocket', 'polling'] });
+
+  // Use API_BASE; allow websocket or polling fallback
+  battleSocket = io(`${window.API_BASE}/battle`, {
+    transports: ['websocket','polling'],
+    timeout: 20000
+  });
 
   battleSocket.on('connect', () => {
-    battleSocket.emit('join', { battleId: state.battle.id, tokenUser: { id: state.user.id, name: state.user.name, role: state.user.role } });
+    // Join then immediately ask for state so we never miss the first broadcast
+    battleSocket.emit('join', {
+      battleId: state.battle.id,
+      tokenUser: { id: state.user.id, name: state.user.name, role: state.user.role }
+    });
+    battleSocket.emit('get');
   });
-  battleSocket.on('state', (s) => { battleState = s; showBattleRoom(); });
-  battleSocket.on('disconnect', () => { alert('Disconnected from battle'); route(); });
+
+  battleSocket.on('state', (s) => {
+    battleState = s;
+    showBattleRoom();
+  });
+
+  battleSocket.on('connect_error', (err) => {
+    alert(`Battle connection failed: ${err?.message || err}`);
+    route();
+  });
+
+  battleSocket.on('error', (err) => {
+    console.warn('battle socket error:', err);
+  });
 
   showBattleRoom();
 }
+
 function battleReady(){ battleSocket?.emit('ready'); }
 function battleStart(){ battleSocket?.emit('start'); }
 function battleAction(type){ battleSocket?.emit('action', { type }); }
-function leaveBattle(){ try{ battleSocket?.disconnect(); }catch{}; battleSocket=null; route(); }
+function leaveBattle(){ try{ battleSocket?.disconnect(); }catch{}; battleSocket=null; battleState=null; route(); }
+
 
 // Boot
 renderNav(); route();
