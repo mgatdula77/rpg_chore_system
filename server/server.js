@@ -9,6 +9,84 @@ import { requireAuth, requireRole } from './authMiddleware.js';
 import http from 'http';
 import { initRealtime } from './realtime.js';
 
+// --- Diablo-style curator helpers ---
+function readJsonEnv(name, fallback) {
+  try { return JSON.parse(process.env[name] || JSON.stringify(fallback)); }
+  catch { return fallback; }
+}
+
+async function refreshUserShop(userId) {
+  // 1) kid level
+  const ur = await pool.query('select level from users where id=$1 and role=$2', [userId, 'kid']);
+  const u = ur.rows[0]; if (!u) return 0;
+  const level = u.level || 1;
+
+  // 2) gear pool (purchasable only)
+  const spread = parseInt(process.env.SHOP_LEVEL_SPREAD || '3', 10);
+  const gr = await pool.query('select * from gear where purchasable=true');
+  const all = gr.rows;
+
+  // 3) rarity & level-weighting
+  const weights = readJsonEnv('SHOP_RARITY_WEIGHTS', { common:60, uncommon:30, rare:9, legendary:1 });
+  const inBand = all.map(g => {
+    const total = g.attack_bonus + g.defense_bonus + g.speed_bonus + g.hp_bonus/5; // hp scaled down
+    const target = Math.max(1, level);
+    const dist = Math.abs(total - target);
+    const bandScore = Math.max(0.2, Math.exp(-(dist*dist) / (2*(spread*spread)))); // closer = higher
+    const rarityW = weights[g.rarity] || 1;
+    return { g, w: rarityW * bandScore, total };
+  }).filter(x => x.w > 0.2);
+
+  if (inBand.length === 0) return 0;
+
+  // 4) sample without replacement
+  const FEATURE_COUNT = parseInt(process.env.SHOP_FEATURE_COUNT || '8', 10);
+  const bag = [];
+  for (const x of inBand) {
+    const copies = Math.max(1, Math.round(x.w));
+    for (let i=0;i<copies;i++) bag.push(x.g);
+  }
+  const picks = [];
+  const seen = new Set();
+  while (picks.length < Math.min(FEATURE_COUNT, inBand.length) && bag.length) {
+    const g = bag[Math.floor(Math.random()*bag.length)];
+    if (!g) break;
+    if (seen.has(g.id)) continue;
+    seen.add(g.id); picks.push(g);
+  }
+
+  // 5) price modifiers by rarity
+  const sale = readJsonEnv('SHOP_RARITY_SALE', { common:1.00, uncommon:0.95, rare:0.95, legendary:1.00 });
+
+  // 6) window
+  const startsAt = new Date();
+  const hours = parseInt(process.env.SHOP_FEATURE_HOURS || '24', 10);
+  const endsAt = new Date(startsAt.getTime() + hours*3600*1000);
+
+  await pool.query('begin');
+  try {
+    // clear expired for this user
+    await pool.query('delete from shop_featured_user where user_id=$1 and ends_at <= now()', [userId]);
+
+    // insert picks
+    for (const g of picks) {
+      const price = Number(g.cost) * (sale[g.rarity] ?? 1);
+      await pool.query(
+        `insert into shop_featured_user (user_id, gear_id, price_override, stock, starts_at, ends_at)
+         values ($1,$2,$3,$4,$5,$6)`,
+        [userId, g.id, price.toFixed(2), null, startsAt.toISOString(), endsAt.toISOString()]
+      );
+    }
+    await pool.query('commit');
+  } catch (e) {
+    await pool.query('rollback'); throw e;
+  }
+  return picks.length;
+}
+
+
+
+
 dotenv.config();
 const app = express();
 // CORS FIRST — allow your client + local dev and the Authorization header
